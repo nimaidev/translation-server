@@ -13,6 +13,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 quantization = None
 
 
+
 def initialize_model_and_tokenizer(ckpt_dir, quantization):
     if quantization == "4-bit":
         qconfig = BitsAndBytesConfig(
@@ -71,7 +72,7 @@ def batch_translate(input_sentences, src_lang, tgt_lang, model, tokenizer, ip):
                 use_cache=True,
                 min_length=0,
                 max_length=256,
-                num_beams=5,
+                num_beams=4,
                 num_return_sequences=1,
             )
 
@@ -96,28 +97,11 @@ en_indic_ckpt_dir = "ai4bharat/indictrans2-en-indic-dist-200M"
 
 en_indic_tokenizer, en_indic_model = initialize_model_and_tokenizer(en_indic_ckpt_dir, quantization)
 
+indic_en_ckpt_dir = "ai4bharat/indictrans2-indic-en-dist-200M"
+
+indic_en_tokenizer, indic_en_model = initialize_model_and_tokenizer(indic_en_ckpt_dir, quantization)
+
 ip = IndicProcessor(inference=True)
-
-en_sents = [
-    "When I was young, I used to go to the park every day.",
-    "He has many old books, which he inherited from his ancestors.",
-    "I can't figure out how to solve my problem.",
-    "She is very hardworking and intelligent, which is why she got all the good marks.",
-    "We watched a new movie last week, which was very inspiring.",
-    "If you had met me at that time, we would have gone out to eat.",
-    "She went to the market with her sister to buy a new sari.",
-    "Raj told me that he is going to his grandmother's house next month.",
-    "All the kids were having fun at the party and were eating lots of sweets.",
-    "My friend has invited me to his birthday party, and I will give him a gift.",
-]
-
-src_lang, tgt_lang = "eng_Latn", "hin_Deva"
-# hi_translations = batch_translate(en_sents, src_lang, tgt_lang, en_indic_model, en_indic_tokenizer, ip)
-
-# print(f"\n{src_lang} - {tgt_lang}")
-# for input_sentence, translation in zip(en_sents, hi_translations):
-#     print(f"{src_lang}: {input_sentence}")
-#     print(f"{tgt_lang}: {translation}")
 
 
 app = FastAPI()
@@ -128,15 +112,53 @@ class Translate(BaseModel):
     source_lan : str
     target_lang: str
 
+
+lang_list = [
+        "eng_Latn", # Latin English
+        "ben_Beng", # Bengali
+        "pan_Guru", # Punjabi
+        "asm_Beng", # Assamese
+        "gom_Deva", # Konkani
+        "guj_Gujr", # Gujarati
+        "hin_Deva", # Hindi
+        "kan_Knda", # Kannada,
+        "mal_Mlym", # Malayalam
+        "ory_Orya", # Odia,
+        "tam_Taml", # Tamil,
+        "tel_Telu", # Telugu
+    ]
+
+# Assamese (asm_Beng)	Kashmiri (Arabic) (kas_Arab)	Punjabi (pan_Guru)
+# Bengali (ben_Beng)	Kashmiri (Devanagari) (kas_Deva)	Sanskrit (san_Deva)
+# Bodo (brx_Deva)	Maithili (mai_Deva)	Santali (sat_Olck)
+# Dogri (doi_Deva)	Malayalam (mal_Mlym)	Sindhi (Arabic) (snd_Arab)
+# English (eng_Latn)	Marathi (mar_Deva)	Sindhi (Devanagari) (snd_Deva)
+# Konkani (gom_Deva)	Manipuri (Bengali) (mni_Beng)	Tamil (tam_Taml)
+# Gujarati (guj_Gujr)	Manipuri (Meitei) (mni_Mtei)	Telugu (tel_Telu)
+# Hindi (hin_Deva)	Nepali (npi_Deva)	Urdu (urd_Arab)
+# Kannada (kan_Knda)	Odia (ory_Orya)	
 # post method to translate
 @app.post("/language-server/translate")
 def translate(input : Translate):
+    if input.source_lan  not in lang_list or input.target_lang not in lang_list:
+        return {
+            "message" : "Not a valid dialect"
+        }
+    
+    model = None
+    tokenizer = None
+    if input.target_lang == "eng_Latn":
+        model = indic_en_model
+        tokenizer = indic_en_tokenizer
+    else:
+        model = en_indic_model
+        tokenizer = en_indic_tokenizer
     translation = batch_translate(
         [input.input_sentence],  # Note: batch_translate expects a list
         src_lang=input.source_lan,
         tgt_lang=input.target_lang,
-        model=en_indic_model, 
-        tokenizer=en_indic_tokenizer,
+        model=model, 
+        tokenizer=tokenizer,
         ip=ip  # Don't forget to pass the ip parameter
     )
     return {"translation": translation[0]} 
@@ -148,8 +170,9 @@ def handle_sigterm(signum, frame):
     print("Received SIGTERM signal. Cleaning up models and exiting...")
     
     # Delete models to free GPU memory
-    global en_indic_tokenizer, en_indic_model
+    global en_indic_tokenizer, en_indic_model, indic_en_tokenizer, indic_en_model
     del en_indic_tokenizer, en_indic_model
+    del indic_en_tokenizer, indic_en_tokenizer  # noqa: F821
     
     torch.cuda.empty_cache()
     sys.exit(0)

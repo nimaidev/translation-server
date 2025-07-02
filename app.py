@@ -41,7 +41,8 @@ def initialize_model_and_tokenizer(ckpt_dir, quantization):
 
     if qconfig is None:
         model = model.to(DEVICE)
-        if DEVICE == "cuda":
+        # Only use half precision if CUDA is available
+        if DEVICE == "cuda" and torch.cuda.is_available():
             model.half()
 
     model.eval()
@@ -88,7 +89,8 @@ def batch_translate(input_sentences, src_lang, tgt_lang, model, tokenizer, ip):
         translations += ip.postprocess_batch(generated_tokens, lang=tgt_lang)
 
         del inputs
-        torch.cuda.empty_cache()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     return translations
 
@@ -130,8 +132,8 @@ lang_list = [
     ]
 
 # post method to translate
-@app.post("/language-server/translate")
-def translate(input : Translate):
+@app.post("/api/v1/translate")
+def translate(input : Translate):# -> dict[str, Any]:
     # start time 
     start_time = time.time() 
     if input.source_lan  not in lang_list or input.target_lang not in lang_list:
@@ -164,6 +166,13 @@ def translate(input : Translate):
         "translation": translation[0]
     } 
 
+@app.get("/health")
+def health_check():
+    return {
+        "status": "healthy",
+        "gpu_available": torch.cuda.is_available(),
+        "gpu_count": torch.cuda.device_count() if torch.cuda.is_available() else 0
+    }
 
 
 # Signal handler for graceful shutdown
@@ -173,9 +182,10 @@ def handle_sigterm(signum, frame):
     # Delete models to free GPU memory
     global en_indic_tokenizer, en_indic_model, indic_en_tokenizer, indic_en_model
     del en_indic_tokenizer, en_indic_model
-    del indic_en_tokenizer, indic_en_tokenizer  # noqa: F821
+    del indic_en_tokenizer, indic_en_model
     
-    torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     sys.exit(0)
 
 # Register the signal handler

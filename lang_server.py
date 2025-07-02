@@ -1,3 +1,4 @@
+import time
 from fastapi import FastAPI
 from pydantic import BaseModel
 import torch
@@ -131,9 +132,12 @@ lang_list = [
 # post method to translate
 @app.post("/language-server/translate")
 def translate(input : Translate):
+    # start time 
+    start_time = time.time() 
     if input.source_lan  not in lang_list or input.target_lang not in lang_list:
         return {
-            "message" : "Not a valid dialect"
+            "message" : "Not a valid dialect",
+            "translation": None
         }
     
     model = None
@@ -152,7 +156,13 @@ def translate(input : Translate):
         tokenizer=tokenizer,
         ip=ip  # Don't forget to pass the ip parameter
     )
-    return {"translation": translation[0]} 
+    # Calculate processing time
+    end_time = time.time()
+    processing_time = round(end_time - start_time, 2)
+    return {
+        "message" : f"translation processed successfully in {processing_time} seconds",
+        "translation": translation[0]
+    } 
 
 
 
